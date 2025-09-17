@@ -4,6 +4,7 @@ from typing import Dict, List, Optional
 import requests
 import streamlit as st
 from dotenv import load_dotenv
+import re
 
 # Load .env if present
 load_dotenv()
@@ -14,6 +15,72 @@ st.set_page_config(
     page_icon="▶️",
     layout="wide",
 )
+
+# ---- Simple Auth (Intro Login) ----
+ADMIN_ID = "admin"
+ADMIN_PW = "$$teckyun73@@"
+
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+if "role" not in st.session_state:
+    st.session_state.role = None  # 'admin' or 'general'
+if "user_name" not in st.session_state:
+    st.session_state.user_name = None
+
+def login_view():
+    st.title("로그인")
+    st.caption("인증 후 인기 동영상 대시보드가 표시됩니다.")
+
+    tab_general, tab_admin = st.tabs(["일반인", "관리자"])
+
+    with tab_general:
+        st.subheader("일반인 섹션")
+        st.info(
+            "비밀번호는 YTB001 ~ YTB100 범위에서 입력하세요.\n\n"
+            "예시: YTB001, YTB010, YTB042, YTB100"
+        )
+        with st.form("login_form_general", clear_on_submit=False):
+            name = st.text_input("성명", value="", placeholder="예) 홍길동")
+            pw = st.text_input("Password", value="", type="password", placeholder="예) YTB001")
+            submitted_g = st.form_submit_button("로그인")
+            if submitted_g:
+                # Validate name
+                if not name.strip():
+                    st.error("성명을 입력하세요.")
+                else:
+                    # Validate password pattern YTB001..YTB100
+                    m = re.fullmatch(r"YTB(\d{3})", pw.strip())
+                    if not m:
+                        st.error("Password 형식이 올바르지 않습니다. 예) YTB001 ~ YTB100")
+                    else:
+                        n = int(m.group(1))
+                        if 1 <= n <= 100:
+                            st.session_state.authenticated = True
+                            st.session_state.role = "general"
+                            st.session_state.user_name = name.strip()
+                            st.success("로그인 성공! 잠시만 기다려주세요…")
+                        else:
+                            st.error("Password 범위는 YTB001 ~ YTB100 입니다.")
+
+    with tab_admin:
+        st.subheader("관리자 섹션")
+        with st.form("login_form_admin", clear_on_submit=False):
+            user_id = st.text_input("ID", value="", autocomplete="username")
+            user_pw = st.text_input("Password", value="", type="password", autocomplete="current-password")
+            submitted_a = st.form_submit_button("로그인")
+            if submitted_a:
+                if user_id == ADMIN_ID and user_pw == ADMIN_PW:
+                    st.session_state.authenticated = True
+                    st.session_state.role = "admin"
+                    st.session_state.user_name = user_id
+                    st.success("로그인 성공! 잠시만 기다려주세요…")
+                else:
+                    st.error("ID 또는 Password가 올바르지 않습니다.")
+
+# Gate: show login until authenticated
+if not st.session_state.authenticated:
+    login_view()
+    st.stop()
 
 # API 키는 배포 호환성을 위해 Streamlit secrets에서만 읽습니다.
 try:
@@ -157,6 +224,18 @@ with st.sidebar:
     # Extract the code from the selected label: e.g., "대한민국 (KR)" -> KR
     region = selected_display.split("(")[-1].rstrip(")")
     refresh = st.button("🔄 새로고침")
+    st.divider()
+    # User info
+    if st.session_state.get("authenticated"):
+        who = st.session_state.get("user_name") or "사용자"
+        role = st.session_state.get("role") or "general"
+        st.caption(f"로그인: {who} ({role})")
+    # Logout control
+    if st.button("로그아웃"):
+        st.session_state.authenticated = False
+        st.session_state.role = None
+        st.session_state.user_name = None
+        st.experimental_rerun()
 
 # API Key validation
 if not API_KEY or (isinstance(API_KEY, str) and not API_KEY.strip()):
