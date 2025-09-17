@@ -67,6 +67,7 @@ def login_view():
                             st.session_state.visit_start_ts = time.time()
                             st.session_state.visit_id = st.session_state.get("visit_id") or str(uuid.uuid4())
                             st.success("로그인 성공! 잠시만 기다려주세요…")
+                            st.experimental_rerun()
                         else:
                             st.error("Password 범위는 YTB001 ~ YTB100 입니다.")
 
@@ -82,6 +83,7 @@ def login_view():
                     st.session_state.role = "admin"
                     st.session_state.user_name = user_id
                     st.success("로그인 성공! 잠시만 기다려주세요…")
+                    st.experimental_rerun()
                 else:
                     st.error("ID 또는 Password가 올바르지 않습니다.")
 
