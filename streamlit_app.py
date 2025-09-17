@@ -21,6 +21,17 @@ st.set_page_config(
     layout="wide",
 )
 
+# Rerun helper for Streamlit versions (st.rerun preferred, fallback to experimental)
+def _rerun():
+    try:
+        # Streamlit >= 1.23
+        st.rerun()
+    except Exception:
+        try:
+            st.experimental_rerun()
+        except Exception:
+            pass
+
 # ---- Simple Auth (Intro Login) ----
 ADMIN_ID = "admin"
 ADMIN_PW = "$$teckyun73@@"
@@ -67,7 +78,7 @@ def login_view():
                             st.session_state.visit_start_ts = time.time()
                             st.session_state.visit_id = st.session_state.get("visit_id") or str(uuid.uuid4())
                             st.success("로그인 성공! 잠시만 기다려주세요…")
-                            st.experimental_rerun()
+                            _rerun()
                         else:
                             st.error("Password 범위는 YTB001 ~ YTB100 입니다.")
 
@@ -83,7 +94,7 @@ def login_view():
                     st.session_state.role = "admin"
                     st.session_state.user_name = user_id
                     st.success("로그인 성공! 잠시만 기다려주세요…")
-                    st.experimental_rerun()
+                    _rerun()
                 else:
                     st.error("ID 또는 Password가 올바르지 않습니다.")
 
@@ -279,7 +290,7 @@ with st.sidebar:
         st.session_state.user_name = None
         st.session_state.visit_start_ts = None
         st.session_state.visit_id = None
-        st.experimental_rerun()
+        _rerun()
 
 # API Key validation
 if not API_KEY or (isinstance(API_KEY, str) and not API_KEY.strip()):
