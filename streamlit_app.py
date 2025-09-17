@@ -5,6 +5,11 @@ import requests
 import streamlit as st
 from dotenv import load_dotenv
 import re
+import csv
+import time
+import uuid
+from pathlib import Path
+from datetime import datetime, timedelta
 
 # Load .env if present
 load_dotenv()
@@ -58,6 +63,9 @@ def login_view():
                             st.session_state.authenticated = True
                             st.session_state.role = "general"
                             st.session_state.user_name = name.strip()
+                            # Start visit session
+                            st.session_state.visit_start_ts = time.time()
+                            st.session_state.visit_id = st.session_state.get("visit_id") or str(uuid.uuid4())
                             st.success("로그인 성공! 잠시만 기다려주세요…")
                         else:
                             st.error("Password 범위는 YTB001 ~ YTB100 입니다.")
@@ -229,12 +237,46 @@ with st.sidebar:
     if st.session_state.get("authenticated"):
         who = st.session_state.get("user_name") or "사용자"
         role = st.session_state.get("role") or "general"
-        st.caption(f"로그인: {who} ({role})")
+        # Duration for general users
+        if role == "general" and st.session_state.get("visit_start_ts"):
+            elapsed = int(time.time() - st.session_state.get("visit_start_ts"))
+            st.caption(f"로그인: {who} ({role}) • 이용시간: {elapsed}s")
+        else:
+            st.caption(f"로그인: {who} ({role})")
     # Logout control
     if st.button("로그아웃"):
+        # Finalize visit record for general users
+        try:
+            if st.session_state.get("role") == "general" and st.session_state.get("visit_start_ts"):
+                start_ts = st.session_state.get("visit_start_ts")
+                end_ts = time.time()
+                duration = int(end_ts - start_ts)
+                visit_id = st.session_state.get("visit_id") or str(uuid.uuid4())
+                user = st.session_state.get("user_name") or "(unknown)"
+                logs_dir = Path("logs")
+                logs_dir.mkdir(exist_ok=True)
+                visits_csv = logs_dir / "visits.csv"
+                # Append a complete visit row
+                row = {
+                    "visit_id": visit_id,
+                    "user_name": user,
+                    "start_time": datetime.fromtimestamp(start_ts).isoformat(timespec="seconds"),
+                    "end_time": datetime.fromtimestamp(end_ts).isoformat(timespec="seconds"),
+                    "duration_sec": duration,
+                }
+                write_header = not visits_csv.exists()
+                with visits_csv.open("a", newline="", encoding="utf-8") as f:
+                    writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+                    if write_header:
+                        writer.writeheader()
+                    writer.writerow(row)
+        except Exception:
+            pass
         st.session_state.authenticated = False
         st.session_state.role = None
         st.session_state.user_name = None
+        st.session_state.visit_start_ts = None
+        st.session_state.visit_id = None
         st.experimental_rerun()
 
 # API Key validation
@@ -287,6 +329,84 @@ for idx, v in enumerate(videos, start=1):
         likes = format_views(v.get("like_count"))
         subs = format_views(v.get("subscriber_count"))
         st.write(f"조회수: {views} · 좋아요: {likes} · 구독자: {subs}명")
+        # Click logging button for general users
+        if st.session_state.get("authenticated") and st.session_state.get("role") == "general" and url != "#":
+            if st.button("보기", key=f"open_{v.get('id')}"):
+                try:
+                    logs_dir = Path("logs")
+                    logs_dir.mkdir(exist_ok=True)
+                    clicks_csv = logs_dir / "clicks.csv"
+                    visit_id = st.session_state.get("visit_id") or str(uuid.uuid4())
+                    if not st.session_state.get("visit_id"):
+                        st.session_state.visit_id = visit_id
+                    user = st.session_state.get("user_name") or "(unknown)"
+                    row = {
+                        "visit_id": visit_id,
+                        "user_name": user,
+                        "timestamp": datetime.now().isoformat(timespec="seconds"),
+                        "video_id": v.get("id"),
+                        "title": title,
+                        "channel_title": v.get("channel_title"),
+                        "url": url,
+                    }
+                    write_header = not clicks_csv.exists()
+                    with clicks_csv.open("a", newline="", encoding="utf-8") as f:
+                        writer = csv.DictWriter(f, fieldnames=list(row.keys()))
+                        if write_header:
+                            writer.writeheader()
+                        writer.writerow(row)
+                    st.success("클릭이 기록되었습니다. 아래 링크를 눌러 새 탭에서 열 수 있습니다.")
+                    st.markdown(f"[새 탭에서 열기]({url})")
+                except Exception as _:
+                    st.warning("클릭 기록 중 문제가 발생했습니다. 링크를 직접 클릭해 주세요.")
     st.divider()
 
 st.success("완료! 최신 인기 동영상이 표시되었습니다.")
+
+# ---- Admin Dashboard: 방문 이력/클릭 요약 ----
+if st.session_state.get("authenticated") and st.session_state.get("role") == "admin":
+    st.header("관리자 대시보드 : 일반인 방문 이력")
+    logs_dir = Path("logs")
+    visits_csv = logs_dir / "visits.csv"
+    clicks_csv = logs_dir / "clicks.csv"
+
+    # Load logs
+    visits: List[Dict] = []
+    clicks: List[Dict] = []
+    if visits_csv.exists():
+        with visits_csv.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            visits = list(reader)
+    if clicks_csv.exists():
+        with clicks_csv.open("r", encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            clicks = list(reader)
+
+    # Metrics
+    total_visits = len(visits)
+    unique_users = len({row.get("user_name") for row in visits}) if visits else 0
+    total_clicks = len(clicks)
+    # Average duration
+    durations = [int(row.get("duration_sec") or 0) for row in visits if (row.get("duration_sec") or "").isdigit()]
+    avg_duration = int(sum(durations) / len(durations)) if durations else 0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("총 방문 수", f"{total_visits}")
+    m2.metric("유니크 사용자", f"{unique_users}")
+    m3.metric("총 클릭 수", f"{total_clicks}")
+    m4.metric("평균 방문 시간(초)", f"{avg_duration}")
+
+    st.subheader("최근 방문")
+    if visits:
+        # Show last 20
+        st.dataframe(visits[-20:])
+        st.download_button("visits.csv 다운로드", data=visits_csv.read_bytes(), file_name="visits.csv", mime="text/csv")
+    else:
+        st.write("방문 데이터가 없습니다.")
+
+    st.subheader("최근 클릭")
+    if clicks:
+        st.dataframe(clicks[-50:])
+        st.download_button("clicks.csv 다운로드", data=clicks_csv.read_bytes(), file_name="clicks.csv", mime="text/csv")
+    else:
+        st.write("클릭 데이터가 없습니다.")
